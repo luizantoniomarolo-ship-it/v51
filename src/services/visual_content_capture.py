@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -34,35 +33,54 @@ class VisualContentCapture:
         self.driver = None
         self.wait_timeout = 10
         self.page_load_timeout = 30
-        
+
         logger.info("📸 Visual Content Capture inicializado")
 
     def _setup_driver(self) -> webdriver.Chrome:
         """Configura o driver do Chrome em modo headless"""
         try:
+            # Verifica se Chrome está instalado
+            chrome_paths = [
+                '/usr/bin/google-chrome',
+                '/usr/bin/google-chrome-stable',
+                '/opt/google/chrome/chrome',
+                '/usr/bin/chromium-browser'
+            ]
+
+            chrome_binary = None
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    chrome_binary = path
+                    break
+
+            if not chrome_binary:
+                logger.error("❌ Chrome não encontrado. Instalando...")
+                raise Exception("Chrome não instalado")
+
             chrome_options = Options()
-            
-            # Configurações para modo headless e otimização
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-plugins")
-            chrome_options.add_argument("--disable-images")  # Para economizar banda
-            chrome_options.add_argument("--disable-javascript")  # Para páginas mais rápidas
-            chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            
-            # Instala automaticamente o ChromeDriver
-            service = Service(ChromeDriverManager().install())
-            
+            chrome_options.binary_location = chrome_binary
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--disable-web-security')
+            chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+            chrome_options.add_argument('--remote-debugging-port=9222')
+
+            # Tenta usar ChromeDriverManager
+            try:
+                service = Service(ChromeDriverManager().install())
+            except Exception as e:
+                logger.warning(f"⚠️ ChromeDriverManager falhou: {e}, tentando chromedriver padrão")
+                service = Service()
+
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.set_page_load_timeout(self.page_load_timeout)
-            
-            logger.info("✅ Chrome driver configurado com sucesso")
+
+            logger.info(f"✅ Chrome driver configurado: {chrome_binary}")
             return driver
-            
+
         except Exception as e:
             logger.error(f"❌ Erro ao configurar Chrome driver: {e}")
             raise
@@ -72,10 +90,10 @@ class VisualContentCapture:
         try:
             session_dir = Path("analyses_data") / "files" / session_id
             session_dir.mkdir(parents=True, exist_ok=True)
-            
+
             logger.info(f"📁 Diretório criado: {session_dir}")
             return session_dir
-            
+
         except Exception as e:
             logger.error(f"❌ Erro ao criar diretório: {e}")
             raise
@@ -84,10 +102,10 @@ class VisualContentCapture:
         """Captura screenshot de uma URL específica"""
         try:
             logger.info(f"📸 Capturando screenshot: {url}")
-            
+
             # Acessa a URL
             self.driver.get(url)
-            
+
             # Aguarda o carregamento da página
             try:
                 WebDriverWait(self.driver, self.wait_timeout).until(
@@ -95,14 +113,14 @@ class VisualContentCapture:
                 )
             except TimeoutException:
                 logger.warning(f"⚠️ Timeout aguardando carregamento de {url}")
-            
+
             # Aguarda um pouco mais para renderização completa
             time.sleep(2)
-            
+
             # Captura informações da página
             page_title = self.driver.title or "Sem título"
             page_url = self.driver.current_url
-            
+
             # Tenta obter meta description
             meta_description = ""
             try:
@@ -110,17 +128,17 @@ class VisualContentCapture:
                 meta_description = meta_element.get_attribute("content") or ""
             except:
                 pass
-            
+
             # Define o caminho do arquivo
             screenshot_path = session_dir / f"{filename}.png"
-            
+
             # Captura o screenshot
             self.driver.save_screenshot(str(screenshot_path))
-            
+
             # Verifica se o arquivo foi criado
             if screenshot_path.exists() and screenshot_path.stat().st_size > 0:
                 logger.info(f"✅ Screenshot salvo: {screenshot_path}")
-                
+
                 return {
                     'success': True,
                     'url': url,
@@ -134,11 +152,11 @@ class VisualContentCapture:
                 }
             else:
                 raise Exception("Screenshot não foi criado ou está vazio")
-                
+
         except Exception as e:
             error_msg = f"Erro ao capturar screenshot de {url}: {e}"
             logger.error(f"❌ {error_msg}")
-            
+
             return {
                 'success': False,
                 'url': url,
@@ -149,13 +167,13 @@ class VisualContentCapture:
     async def capture_screenshots(self, urls: List[str], session_id: str) -> Dict[str, Any]:
         """
         Captura screenshots de uma lista de URLs
-        
+
         Args:
             urls: Lista de URLs para capturar
             session_id: ID da sessão para organização
         """
         logger.info(f"📸 Iniciando captura de {len(urls)} screenshots para sessão {session_id}")
-        
+
         # Resultado da operação
         capture_results = {
             'session_id': session_id,
@@ -167,15 +185,15 @@ class VisualContentCapture:
             'start_time': datetime.now().isoformat(),
             'session_directory': None
         }
-        
+
         try:
             # Cria diretório da sessão
             session_dir = self._create_session_directory(session_id)
             capture_results['session_directory'] = str(session_dir)
-            
+
             # Configura o driver
             self.driver = self._setup_driver()
-            
+
             # Processa cada URL
             for i, url in enumerate(urls, 1):
                 if not url or not url.startswith(('http://', 'https://')):
@@ -183,40 +201,40 @@ class VisualContentCapture:
                     capture_results['failed_captures'] += 1
                     capture_results['errors'].append(f"URL inválida: {url}")
                     continue
-                
+
                 try:
                     # Gera nome do arquivo
                     filename = f"screenshot_{i:03d}"
-                    
+
                     # Captura o screenshot
                     result = self._take_screenshot(url, filename, session_dir)
-                    
+
                     if result['success']:
                         capture_results['successful_captures'] += 1
                         capture_results['screenshots'].append(result)
                     else:
                         capture_results['failed_captures'] += 1
                         capture_results['errors'].append(result['error'])
-                    
+
                     # Pequena pausa entre capturas para não sobrecarregar
                     await asyncio.sleep(1)
-                    
+
                 except Exception as e:
                     error_msg = f"Erro processando URL {url}: {e}"
                     logger.error(f"❌ {error_msg}")
                     capture_results['failed_captures'] += 1
                     capture_results['errors'].append(error_msg)
-            
+
             # Finaliza a captura
             capture_results['end_time'] = datetime.now().isoformat()
-            
+
             logger.info(f"✅ Captura concluída: {capture_results['successful_captures']}/{capture_results['total_urls']} sucessos")
-            
+
         except Exception as e:
             error_msg = f"Erro crítico na captura: {e}"
             logger.error(f"❌ {error_msg}")
             capture_results['critical_error'] = error_msg
-            
+
         finally:
             # Fecha o driver se estiver aberto
             if self.driver:
@@ -226,48 +244,48 @@ class VisualContentCapture:
                 except Exception as e:
                     logger.error(f"❌ Erro ao fechar driver: {e}")
                 self.driver = None
-        
+
         return capture_results
 
     def select_top_urls(self, all_results: Dict[str, Any], max_urls: int = 10) -> List[str]:
         """
         Seleciona as URLs mais relevantes dos resultados de busca
-        
+
         Args:
             all_results: Resultados consolidados de todas as buscas
             max_urls: Número máximo de URLs para retornar
         """
         logger.info(f"🎯 Selecionando top {max_urls} URLs mais relevantes")
-        
+
         all_urls = all_results.get('consolidated_urls', [])
-        
+
         if not all_urls:
             logger.warning("⚠️ Nenhuma URL encontrada nos resultados")
             return []
-        
+
         # Por enquanto, retorna as primeiras URLs únicas
         # Em uma implementação mais sofisticada, poderia ranquear por relevância
         unique_urls = []
         seen_domains = set()
-        
+
         for url in all_urls:
             try:
                 # Extrai domínio para diversificar
                 from urllib.parse import urlparse
                 domain = urlparse(url).netloc.lower()
-                
+
                 # Adiciona URL se for de domínio novo ou se ainda não temos URLs suficientes
                 if domain not in seen_domains or len(unique_urls) < max_urls // 2:
                     unique_urls.append(url)
                     seen_domains.add(domain)
-                    
+
                     if len(unique_urls) >= max_urls:
                         break
-                        
+
             except Exception as e:
                 logger.warning(f"⚠️ Erro processando URL {url}: {e}")
                 continue
-        
+
         logger.info(f"✅ Selecionadas {len(unique_urls)} URLs de {len(seen_domains)} domínios diferentes")
         return unique_urls
 
@@ -277,26 +295,26 @@ class VisualContentCapture:
             files_dir = Path("analyses_data") / "files"
             if not files_dir.exists():
                 return
-            
+
             cutoff_time = time.time() - (days_old * 24 * 60 * 60)
             removed_count = 0
-            
+
             for session_dir in files_dir.iterdir():
                 if session_dir.is_dir():
                     for screenshot in session_dir.glob("*.png"):
                         if screenshot.stat().st_mtime < cutoff_time:
                             screenshot.unlink()
                             removed_count += 1
-                    
+
                     # Remove diretório se estiver vazio
                     try:
                         session_dir.rmdir()
                     except OSError:
                         pass  # Diretório não está vazio
-            
+
             if removed_count > 0:
                 logger.info(f"🧹 Removidos {removed_count} screenshots antigos")
-                
+
         except Exception as e:
             logger.error(f"❌ Erro na limpeza: {e}")
 

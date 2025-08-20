@@ -37,6 +37,12 @@ class AlibabaWebSailorAgent:
         self.jina_reader_url = "https://r.jina.ai/"
         self.serper_url = "https://google.serper.dev/search"
 
+        # Rate limiting
+        self.jina_rate_limit = 60  # segundos entre requisições
+        self.last_jina_request = 0
+        self.jina_failure_count = 0
+        self.max_jina_failures = 5
+
         # Headers inteligentes para navegação
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

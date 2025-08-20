@@ -115,10 +115,39 @@ class MassiveDataCollector:
         }
 
         try:
-            # FASE 1: Busca Web Intercalada com Rotação de APIs
+            # FASE 1: Busca Web Intercalada com Rotação de APIs + Alibaba WebSailor
             logger.info("🔍 FASE 1: Executando busca web intercalada...")
             web_results = await search_api_manager.interleaved_search(query)
             massive_data["web_search_data"] = web_results
+            
+            # FASE 1.1: Navegação Profunda com Alibaba WebSailor
+            logger.info("🌐 FASE 1.1: Executando navegação profunda com Alibaba WebSailor...")
+            try:
+                from services.alibaba_websailor import AlibabaWebSailorAgent
+                alibaba_agent = AlibabaWebSailorAgent()
+                
+                if alibaba_agent.enabled:
+                    # Executa com parâmetros otimizados para evitar rate limit
+                    websailor_results = alibaba_agent.navigate_and_research_deep(
+                        query=query,
+                        context=context,
+                        max_pages=15,  # Reduzido para evitar rate limit
+                        depth_levels=2,  # Reduzido para performance
+                        session_id=session_id
+                    )
+                    massive_data["websailor_navigation"] = websailor_results
+                    pages_analyzed = websailor_results.get('navegacao_profunda', {}).get('total_paginas_analisadas', 0)
+                    logger.info(f"✅ Alibaba WebSailor executado: {pages_analyzed} páginas analisadas")
+                    
+                    # Adiciona delay para evitar rate limiting
+                    await asyncio.sleep(2)
+                    
+                else:
+                    logger.warning("⚠️ Alibaba WebSailor desabilitado")
+                    massive_data["websailor_navigation"] = {"success": False, "error": "WebSailor desabilitado"}
+            except Exception as websailor_error:
+                logger.error(f"❌ Erro no Alibaba WebSailor: {websailor_error}", exc_info=True)
+                massive_data["websailor_navigation"] = {"success": False, "error": str(websailor_error)}
 
             # FASE 2: Coleta de Tendências via TrendFinder MCP
             logger.info("📈 FASE 2: Coletando tendências via TrendFinder...")
@@ -203,6 +232,31 @@ class MassiveDataCollector:
                 for provider_result in web_results["all_results"]:
                     if provider_result.get("success") and provider_result.get("results"):
                         all_results.extend(provider_result["results"])
+            
+            # Processa resultados do WebSailor
+            if massive_data.get("websailor_navigation"):
+                websailor_data = massive_data["websailor_navigation"]
+                conteudo_consolidado = websailor_data.get("conteudo_consolidado", {})
+                
+                # Adiciona insights do WebSailor
+                insights = conteudo_consolidado.get("insights_principais", [])
+                for insight in insights:
+                    all_results.append({
+                        "source": "Alibaba_WebSailor",
+                        "content": insight,
+                        "type": "insight"
+                    })
+                
+                # Adiciona fontes detalhadas do WebSailor
+                fontes = conteudo_consolidado.get("fontes_detalhadas", [])
+                for fonte in fontes:
+                    all_results.append({
+                        "source": "Alibaba_WebSailor",
+                        "url": fonte.get("url"),
+                        "title": fonte.get("title"),
+                        "quality_score": fonte.get("quality_score"),
+                        "type": "deep_source"
+                    })
 
             # Processa resultados sociais existentes - CORRIGIDO
             if social_results.get("all_platforms_data"):
@@ -242,8 +296,14 @@ class MassiveDataCollector:
             total_content = sum(len(str(item)) for item in all_results)
 
             # Atualiza estatísticas com informações dos novos serviços
+            websailor_pages = 0
+            if massive_data.get("websailor_navigation"):
+                navegacao_data = massive_data["websailor_navigation"].get("navegacao_profunda", {})
+                websailor_pages = navegacao_data.get("total_paginas_analisadas", 0)
+            
             sources_by_type = {
                 "web_search_intercalado": web_results.get("successful_searches", 0),
+                "alibaba_websailor": websailor_pages,
                 "social_media_fallback": self._count_social_results(social_results),
                 "trendfinder_mcp": len(massive_data["trends_data"].get("trends", [])),
                 "supadata_mcp": massive_data["supadata_results"].get("total_results", 0),
@@ -659,6 +719,34 @@ class MassiveDataCollector:
                         report += f"**{j}. {result.get('title', 'Sem título')}**  \n"
                         report += f"URL: {result.get('url', 'N/A')}  \n"
                         report += f"Resumo: {result.get('snippet', 'N/A')[:200]}...\n\n"
+        
+        # Adiciona dados do Alibaba WebSailor
+        websailor_data = massive_data.get('websailor_navigation', {})
+        if websailor_data:
+            report += "## 🌐 ALIBABA WEBSAILOR - NAVEGAÇÃO PROFUNDA\n\n"
+            navegacao_data = websailor_data.get('navegacao_profunda', {})
+            
+            report += f"**Páginas Analisadas:** {navegacao_data.get('total_paginas_analisadas', 0)}  \n"
+            report += f"**Engines Utilizados:** {', '.join(navegacao_data.get('engines_utilizados', []))}  \n"
+            report += f"**Fontes Preferenciais:** {navegacao_data.get('fontes_preferenciais', 0)}  \n"
+            report += f"**Qualidade Média:** {navegacao_data.get('qualidade_media', 0)}  \n\n"
+            
+            # Adiciona insights principais
+            conteudo_data = websailor_data.get('conteudo_consolidado', {})
+            insights = conteudo_data.get('insights_principais', [])
+            if insights:
+                report += "### Insights Principais:\n\n"
+                for i, insight in enumerate(insights[:10], 1):
+                    report += f"**{i}.** {insight[:300]}...\n\n"
+            
+            # Adiciona fontes detalhadas
+            fontes = conteudo_data.get('fontes_detalhadas', [])
+            if fontes:
+                report += "### Fontes Detalhadas:\n\n"
+                for i, fonte in enumerate(fontes[:5], 1):
+                    report += f"**{i}. {fonte.get('title', 'Sem título')}**  \n"
+                    report += f"URL: {fonte.get('url', 'N/A')}  \n"
+                    report += f"Qualidade: {fonte.get('quality_score', 0)}  \n\n"
         
         # Adiciona dados sociais
         social_data = massive_data.get('social_media_data', {})

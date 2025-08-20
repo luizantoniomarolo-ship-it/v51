@@ -28,6 +28,12 @@ except ImportError:
     HAS_OPENAI = False
 
 try:
+    import dashscope
+    HAS_QWEN = True
+except ImportError:
+    HAS_QWEN = False
+
+try:
     from services.groq_client import groq_client
     HAS_GROQ_CLIENT = True
 except ImportError:
@@ -127,6 +133,40 @@ class AIManager:
                 logger.info("ℹ️ Groq não disponível ou não configurado.")
         except Exception as e:
             logger.warning(f"ℹ️ Groq não disponível: {str(e)}")
+
+        # Inicializa Qwen
+        try:
+            if HAS_QWEN:
+                api_key = os.getenv('QWEN_API_KEY') or os.getenv('DASHSCOPE_API_KEY')
+                if api_key:
+                    dashscope.api_key = api_key
+                    # Testa conexão
+                    test_response = dashscope.Generation.call(
+                        model='qwen-turbo',
+                        prompt='Hello',
+                        max_tokens=10
+                    )
+                    if test_response.status_code == 200:
+                        self.providers['qwen'] = {
+                            'client': dashscope,
+                            'available': True,
+                            'model': 'qwen-max',
+                            'priority': 4,
+                            'error_count': 0,
+                            'consecutive_failures': 0,
+                            'max_errors': 3,
+                            'last_success': None,
+                            'supports_tools': False
+                        }
+                        logger.info("✅ Qwen-Max inicializado e testado.")
+                    else:
+                        logger.warning(f"⚠️ Qwen API test failed: {test_response.message}")
+                else:
+                    logger.info("ℹ️ QWEN_API_KEY não configurada.")
+            else:
+                logger.info("ℹ️ Biblioteca 'dashscope' não instalada.")
+        except Exception as e:
+            logger.warning(f"ℹ️ Qwen não disponível: {str(e)}")
 
     def _get_available_provider(self, require_tools: bool = False) -> Optional[str]:
         """Seleciona o melhor provedor disponível"""
@@ -277,39 +317,13 @@ class AIManager:
     async def _execute_gemini_with_tools(self, prompt: str, tools: List[str], history: List[Dict]) -> Dict[str, Any]:
         """Executa Gemini com suporte a ferramentas"""
         try:
+            # Usa API simples do Gemini sem tools por enquanto
             model = genai.GenerativeModel('gemini-2.0-flash-exp')
             
-            # Prepara function declarations se google_search está nas tools
-            function_declarations = []
-            if 'google_search' in tools:
-                function_declarations.append(self._get_google_search_function_definition())
+            # Envia mensagem simples
+            response = model.generate_content(prompt)
             
-            # Configura ferramentas se disponíveis
-            tool_config = None
-            if function_declarations:
-                tool_config = genai.protos.Tool(function_declarations=function_declarations)
-            
-            # Inicia chat com ferramentas
-            if tool_config:
-                chat = model.start_chat(tools=[tool_config])
-            else:
-                chat = model.start_chat()
-            
-            # Envia mensagem
-            response = chat.send_message(prompt)
-            
-            # Verifica se há function calls
-            if response.candidates[0].content.parts:
-                for part in response.candidates[0].content.parts:
-                    if part.function_call:
-                        function_call = part.function_call
-                        return {
-                            'type': 'tool_call',
-                            'tool_name': function_call.name,
-                            'tool_args': dict(function_call.args)
-                        }
-            
-            # Se não há function calls, retorna o texto
+            # Retorna texto simples
             return {
                 'type': 'text',
                 'content': response.text
@@ -419,6 +433,8 @@ class AIManager:
                 result = await self._generate_openai(prompt, max_tokens, temperature)
             elif provider_name == 'groq':
                 result = provider['client'].generate(prompt, max_tokens)
+            elif provider_name == 'qwen':
+                result = await self._generate_qwen(prompt, max_tokens, temperature)
             else:
                 raise Exception(f"Provedor {provider_name} não implementado")
             
@@ -472,6 +488,22 @@ class AIManager:
         )
         
         return response.choices[0].message.content
+
+    async def _generate_qwen(self, prompt: str, max_tokens: int, temperature: float) -> str:
+        """Gera texto usando Qwen"""
+        from dashscope import Generation
+        
+        response = Generation.call(
+            model='qwen-max',
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature
+        )
+        
+        if response.status_code == 200:
+            return response.output.text
+        else:
+            raise Exception(f"Qwen API error: {response.message}")
 
     def get_status(self) -> Dict[str, Any]:
         """Retorna status dos provedores"""
